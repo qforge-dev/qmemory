@@ -390,7 +390,7 @@ class KnowledgeGraphManager {
         `
         SELECT entity_id, distance 
         FROM entities_vec 
-        WHERE vec_search(embedding, ?) 
+        WHERE embedding MATCH ? 
         ORDER BY distance 
         LIMIT ?
       `

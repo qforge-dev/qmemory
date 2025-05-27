@@ -191,8 +191,8 @@ class KnowledgeGraphManager {
               .prepare("UPDATE entities SET embedding = ? WHERE id = ?")
               .run(embeddingNodeBuffer, lastInsertRowid);
 
-            // Insert into the vector table (sqlite-vec expects ArrayBuffer)
-            insertVecEntity.run(lastInsertRowid, embedding.buffer);
+            // Insert into the vector table (sqlite-vec expects Float32Array and BigInt for ID)
+            insertVecEntity.run(BigInt(lastInsertRowid as number), embedding);
           } catch (error) {
             console.error(
               `Error generating/storing embedding for entity ${entity.name}:`,
@@ -295,8 +295,8 @@ class KnowledgeGraphManager {
               const embeddingNodeBuffer = Buffer.from(embedding.buffer);
               updateEntityEmbedding.run(embeddingNodeBuffer, entityRow.id);
 
-              // Update embedding in vector table (sqlite-vec expects ArrayBuffer)
-              updateVecEntity.run(embedding.buffer, entityRow.id);
+              // Update embedding in vector table (sqlite-vec expects Float32Array and BigInt for ID)
+              updateVecEntity.run(embedding, BigInt(entityRow.id));
             } catch (error) {
               console.error(
                 `Error updating embedding for entity ${o.entityName}:`,
@@ -395,7 +395,7 @@ class KnowledgeGraphManager {
         LIMIT ?
       `
       )
-      .all(queryEmbedding.buffer, topK) as Array<{
+      .all(queryEmbedding, topK) as Array<{
       entity_id: number;
       distance: number;
     }>;

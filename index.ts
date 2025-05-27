@@ -6,25 +6,25 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { promises as fs } from "fs";
+import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
 
-// Define memory file path using environment variable with fallback
-const defaultMemoryPath = path.join(
+// Define database file path using environment variable with fallback
+const defaultDbPath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  "memory.json"
+  "memory.db"
 );
 
-// If MEMORY_FILE_PATH is just a filename, put it in the same directory as the script
-const MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH
-  ? path.isAbsolute(process.env.MEMORY_FILE_PATH)
-    ? process.env.MEMORY_FILE_PATH
+// If DB_FILE_PATH is just a filename, put it in the same directory as the script
+const DB_FILE_PATH = process.env.DB_FILE_PATH
+  ? path.isAbsolute(process.env.DB_FILE_PATH)
+    ? process.env.DB_FILE_PATH
     : path.join(
         path.dirname(fileURLToPath(import.meta.url)),
-        process.env.MEMORY_FILE_PATH
+        process.env.DB_FILE_PATH
       )
-  : defaultMemoryPath;
+  : defaultDbPath;
 
 // We are storing our memory using entities, relations, and observations in a graph structure
 interface Entity {
@@ -46,123 +46,200 @@ interface KnowledgeGraph {
 
 // The KnowledgeGraphManager class contains all operations to interact with the knowledge graph
 class KnowledgeGraphManager {
+  private db: Database.Database;
+
+  constructor() {
+    this.db = new Database(DB_FILE_PATH);
+    this.initializeDatabase();
+  }
+
+  private initializeDatabase(): void {
+    // Create tables if they don't exist
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        entityType TEXT NOT NULL,
+        observations TEXT DEFAULT ''
+      );
+
+      CREATE TABLE IF NOT EXISTS relations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_entity TEXT NOT NULL,
+        to_entity TEXT NOT NULL,
+        relationType TEXT NOT NULL,
+        UNIQUE(from_entity, to_entity, relationType)
+      );
+    `);
+  }
+
   private async loadGraph(): Promise<KnowledgeGraph> {
     try {
-      const data = await fs.readFile(MEMORY_FILE_PATH, "utf-8");
-      const lines = data.split("\n").filter((line) => line.trim() !== "");
-      return lines.reduce(
-        (graph: KnowledgeGraph, line) => {
-          const item = JSON.parse(line);
-          if (item.type === "entity") graph.entities.push(item as Entity);
-          if (item.type === "relation") graph.relations.push(item as Relation);
-          return graph;
-        },
-        { entities: [], relations: [] }
-      );
+      const entities = this.db
+        .prepare("SELECT * FROM entities")
+        .all() as Array<{
+        name: string;
+        entityType: string;
+        observations: string;
+      }>;
+
+      const relations = this.db
+        .prepare("SELECT * FROM relations")
+        .all() as Array<{
+        from_entity: string;
+        to_entity: string;
+        relationType: string;
+      }>;
+
+      return {
+        entities: entities.map((e) => ({
+          name: e.name,
+          entityType: e.entityType,
+          observations: e.observations ? e.observations.split("|||") : [],
+        })),
+        relations: relations.map((r) => ({
+          from: r.from_entity,
+          to: r.to_entity,
+          relationType: r.relationType,
+        })),
+      };
     } catch (error) {
-      if (
-        error instanceof Error &&
-        "code" in error &&
-        (error as any).code === "ENOENT"
-      ) {
-        return { entities: [], relations: [] };
-      }
-      throw error;
+      // Return empty graph if there's an error
+      return { entities: [], relations: [] };
     }
   }
 
-  private async saveGraph(graph: KnowledgeGraph): Promise<void> {
-    const lines = [
-      ...graph.entities.map((e) => JSON.stringify({ type: "entity", ...e })),
-      ...graph.relations.map((r) => JSON.stringify({ type: "relation", ...r })),
-    ];
-    await fs.writeFile(MEMORY_FILE_PATH, lines.join("\n"));
-  }
-
   async createEntities(entities: Entity[]): Promise<Entity[]> {
-    const graph = await this.loadGraph();
-    const newEntities = entities.filter(
-      (e) =>
-        !graph.entities.some((existingEntity) => existingEntity.name === e.name)
-    );
-    graph.entities.push(...newEntities);
-    await this.saveGraph(graph);
+    const insertEntity = this.db.prepare(`
+      INSERT OR IGNORE INTO entities (name, entityType, observations) 
+      VALUES (?, ?, ?)
+    `);
+
+    const newEntities: Entity[] = [];
+
+    for (const entity of entities) {
+      const result = insertEntity.run(
+        entity.name,
+        entity.entityType,
+        entity.observations.join("|||")
+      );
+
+      if (result.changes > 0) {
+        newEntities.push(entity);
+      }
+    }
+
     return newEntities;
   }
 
   async createRelations(relations: Relation[]): Promise<Relation[]> {
-    const graph = await this.loadGraph();
-    const newRelations = relations.filter(
-      (r) =>
-        !graph.relations.some(
-          (existingRelation) =>
-            existingRelation.from === r.from &&
-            existingRelation.to === r.to &&
-            existingRelation.relationType === r.relationType
-        )
-    );
-    graph.relations.push(...newRelations);
-    await this.saveGraph(graph);
+    const insertRelation = this.db.prepare(`
+      INSERT OR IGNORE INTO relations (from_entity, to_entity, relationType) 
+      VALUES (?, ?, ?)
+    `);
+
+    const newRelations: Relation[] = [];
+
+    for (const relation of relations) {
+      const result = insertRelation.run(
+        relation.from,
+        relation.to,
+        relation.relationType
+      );
+
+      if (result.changes > 0) {
+        newRelations.push(relation);
+      }
+    }
+
     return newRelations;
   }
 
   async addObservations(
     observations: { entityName: string; contents: string[] }[]
   ): Promise<{ entityName: string; addedObservations: string[] }[]> {
-    const graph = await this.loadGraph();
+    const getEntity = this.db.prepare(
+      "SELECT observations FROM entities WHERE name = ?"
+    );
+    const updateEntity = this.db.prepare(
+      "UPDATE entities SET observations = ? WHERE name = ?"
+    );
+
     const results = observations.map((o) => {
-      const entity = graph.entities.find((e) => e.name === o.entityName);
+      const entity = getEntity.get(o.entityName) as
+        | { observations: string }
+        | undefined;
+
       if (!entity) {
         throw new Error(`Entity with name ${o.entityName} not found`);
       }
+
+      const existingObservations = entity.observations
+        ? entity.observations.split("|||")
+        : [];
       const newObservations = o.contents.filter(
-        (content) => !entity.observations.includes(content)
+        (content) => !existingObservations.includes(content)
       );
-      entity.observations.push(...newObservations);
+
+      if (newObservations.length > 0) {
+        const allObservations = [...existingObservations, ...newObservations];
+        updateEntity.run(allObservations.join("|||"), o.entityName);
+      }
+
       return { entityName: o.entityName, addedObservations: newObservations };
     });
-    await this.saveGraph(graph);
+
     return results;
   }
 
   async deleteEntities(entityNames: string[]): Promise<void> {
-    const graph = await this.loadGraph();
-    graph.entities = graph.entities.filter(
-      (e) => !entityNames.includes(e.name)
+    const deleteEntity = this.db.prepare("DELETE FROM entities WHERE name = ?");
+    const deleteRelations = this.db.prepare(
+      "DELETE FROM relations WHERE from_entity = ? OR to_entity = ?"
     );
-    graph.relations = graph.relations.filter(
-      (r) => !entityNames.includes(r.from) && !entityNames.includes(r.to)
-    );
-    await this.saveGraph(graph);
+
+    for (const entityName of entityNames) {
+      deleteEntity.run(entityName);
+      deleteRelations.run(entityName, entityName);
+    }
   }
 
   async deleteObservations(
     deletions: { entityName: string; observations: string[] }[]
   ): Promise<void> {
-    const graph = await this.loadGraph();
+    const getEntity = this.db.prepare(
+      "SELECT observations FROM entities WHERE name = ?"
+    );
+    const updateEntity = this.db.prepare(
+      "UPDATE entities SET observations = ? WHERE name = ?"
+    );
+
     deletions.forEach((d) => {
-      const entity = graph.entities.find((e) => e.name === d.entityName);
+      const entity = getEntity.get(d.entityName) as
+        | { observations: string }
+        | undefined;
+
       if (entity) {
-        entity.observations = entity.observations.filter(
+        const existingObservations = entity.observations
+          ? entity.observations.split("|||")
+          : [];
+        const filteredObservations = existingObservations.filter(
           (o) => !d.observations.includes(o)
         );
+        updateEntity.run(filteredObservations.join("|||"), d.entityName);
       }
     });
-    await this.saveGraph(graph);
   }
 
   async deleteRelations(relations: Relation[]): Promise<void> {
-    const graph = await this.loadGraph();
-    graph.relations = graph.relations.filter(
-      (r) =>
-        !relations.some(
-          (delRelation) =>
-            r.from === delRelation.from &&
-            r.to === delRelation.to &&
-            r.relationType === delRelation.relationType
-        )
-    );
-    await this.saveGraph(graph);
+    const deleteRelation = this.db.prepare(`
+      DELETE FROM relations 
+      WHERE from_entity = ? AND to_entity = ? AND relationType = ?
+    `);
+
+    for (const relation of relations) {
+      deleteRelation.run(relation.from, relation.to, relation.relationType);
+    }
   }
 
   async readGraph(): Promise<KnowledgeGraph> {
@@ -171,56 +248,107 @@ class KnowledgeGraphManager {
 
   // Very basic search function
   async searchNodes(query: string): Promise<KnowledgeGraph> {
-    const graph = await this.loadGraph();
+    const lowerQuery = query.toLowerCase();
 
-    // Filter entities
-    const filteredEntities = graph.entities.filter(
-      (e) =>
-        e.name.toLowerCase().includes(query.toLowerCase()) ||
-        e.entityType.toLowerCase().includes(query.toLowerCase()) ||
-        e.observations.some((o) =>
-          o.toLowerCase().includes(query.toLowerCase())
+    const entities = this.db
+      .prepare(
+        `
+      SELECT * FROM entities 
+      WHERE LOWER(name) LIKE ? 
+         OR LOWER(entityType) LIKE ? 
+         OR LOWER(observations) LIKE ?
+    `
+      )
+      .all(`%${lowerQuery}%`, `%${lowerQuery}%`, `%${lowerQuery}%`) as Array<{
+      name: string;
+      entityType: string;
+      observations: string;
+    }>;
+
+    const entityNames = entities.map((e) => e.name);
+
+    let relations: Array<{
+      from_entity: string;
+      to_entity: string;
+      relationType: string;
+    }> = [];
+
+    if (entityNames.length > 0) {
+      const placeholders = entityNames.map(() => "?").join(",");
+      relations = this.db
+        .prepare(
+          `
+        SELECT * FROM relations 
+        WHERE from_entity IN (${placeholders}) 
+          AND to_entity IN (${placeholders})
+      `
         )
-    );
+        .all(...entityNames, ...entityNames) as Array<{
+        from_entity: string;
+        to_entity: string;
+        relationType: string;
+      }>;
+    }
 
-    // Create a Set of filtered entity names for quick lookup
-    const filteredEntityNames = new Set(filteredEntities.map((e) => e.name));
-
-    // Filter relations to only include those between filtered entities
-    const filteredRelations = graph.relations.filter(
-      (r) => filteredEntityNames.has(r.from) && filteredEntityNames.has(r.to)
-    );
-
-    const filteredGraph: KnowledgeGraph = {
-      entities: filteredEntities,
-      relations: filteredRelations,
+    return {
+      entities: entities.map((e) => ({
+        name: e.name,
+        entityType: e.entityType,
+        observations: e.observations ? e.observations.split("|||") : [],
+      })),
+      relations: relations.map((r) => ({
+        from: r.from_entity,
+        to: r.to_entity,
+        relationType: r.relationType,
+      })),
     };
-
-    return filteredGraph;
   }
 
   async openNodes(names: string[]): Promise<KnowledgeGraph> {
-    const graph = await this.loadGraph();
+    if (names.length === 0) {
+      return { entities: [], relations: [] };
+    }
 
-    // Filter entities
-    const filteredEntities = graph.entities.filter((e) =>
-      names.includes(e.name)
-    );
+    const placeholders = names.map(() => "?").join(",");
 
-    // Create a Set of filtered entity names for quick lookup
-    const filteredEntityNames = new Set(filteredEntities.map((e) => e.name));
+    const entities = this.db
+      .prepare(
+        `
+      SELECT * FROM entities WHERE name IN (${placeholders})
+    `
+      )
+      .all(...names) as Array<{
+      name: string;
+      entityType: string;
+      observations: string;
+    }>;
 
-    // Filter relations to only include those between filtered entities
-    const filteredRelations = graph.relations.filter(
-      (r) => filteredEntityNames.has(r.from) && filteredEntityNames.has(r.to)
-    );
+    const relations = this.db
+      .prepare(
+        `
+      SELECT * FROM relations 
+      WHERE from_entity IN (${placeholders}) 
+        AND to_entity IN (${placeholders})
+    `
+      )
+      .all(...names, ...names) as Array<{
+      from_entity: string;
+      to_entity: string;
+      relationType: string;
+    }>;
 
-    const filteredGraph: KnowledgeGraph = {
-      entities: filteredEntities,
-      relations: filteredRelations,
+    return {
+      entities: entities.map((e) => ({
+        name: e.name,
+        entityType: e.entityType,
+        observations: e.observations ? e.observations.split("|||") : [],
+      })),
+      relations: relations.map((r) => ({
+        from: r.from_entity,
+        to: r.to_entity,
+        relationType: r.relationType,
+      })),
     };
-
-    return filteredGraph;
   }
 }
 

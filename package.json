@@ -22,7 +22,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.0.1",
-    "better-sqlite3": "^11.10.0"
+    "better-sqlite3": "^11.10.0",
+    "fastembed": "^1.14.4",
+    "sqlite-vec": "0.1.7-alpha.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

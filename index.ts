@@ -7,6 +7,8 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
+import { FlagEmbedding, EmbeddingModel } from "fastembed";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -47,10 +49,20 @@ interface KnowledgeGraph {
 // The KnowledgeGraphManager class contains all operations to interact with the knowledge graph
 class KnowledgeGraphManager {
   private db: Database.Database;
+  private embeddingModel: FlagEmbedding | null = null;
 
-  constructor() {
+  private constructor() {
     this.db = new Database(DB_FILE_PATH);
+    sqliteVec.load(this.db);
     this.initializeDatabase();
+  }
+
+  public static async create(): Promise<KnowledgeGraphManager> {
+    const manager = new KnowledgeGraphManager();
+    manager.embeddingModel = await FlagEmbedding.init({
+      model: EmbeddingModel.BGEBaseEN,
+    });
+    return manager;
   }
 
   private initializeDatabase(): void {
@@ -60,7 +72,8 @@ class KnowledgeGraphManager {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
         entityType TEXT NOT NULL,
-        observations TEXT DEFAULT ''
+        observations TEXT DEFAULT '',
+        embedding BLOB 
       );
 
       CREATE TABLE IF NOT EXISTS relations (
@@ -70,7 +83,36 @@ class KnowledgeGraphManager {
         relationType TEXT NOT NULL,
         UNIQUE(from_entity, to_entity, relationType)
       );
+
+      -- Create virtual table for vector search if it doesn't exist
+      CREATE VIRTUAL TABLE IF NOT EXISTS entities_vec USING vec0(
+        entity_id INTEGER PRIMARY KEY,
+        embedding FLOAT[768] -- Adjusted for BGEBaseEN (768 dimensions)
+      );
     `);
+  }
+
+  private async generateEmbedding(text: string): Promise<Float32Array> {
+    if (!this.embeddingModel) {
+      throw new Error(
+        "Embedding model not initialized. Call KnowledgeGraphManager.create()"
+      );
+    }
+    // fastembed expects an array of documents
+    const embeddingsGenerator = this.embeddingModel.embed([text]);
+    let firstEmbeddingArray: number[] | null = null;
+
+    for await (const batch of embeddingsGenerator) {
+      if (batch && batch.length > 0 && batch[0] && batch[0].length > 0) {
+        firstEmbeddingArray = batch[0];
+        break; // We only need the first embedding for a single text input
+      }
+    }
+
+    if (!firstEmbeddingArray) {
+      throw new Error("Failed to generate embedding.");
+    }
+    return new Float32Array(firstEmbeddingArray);
   }
 
   private async loadGraph(): Promise<KnowledgeGraph> {
@@ -111,21 +153,52 @@ class KnowledgeGraphManager {
 
   async createEntities(entities: Entity[]): Promise<Entity[]> {
     const insertEntity = this.db.prepare(`
-      INSERT OR IGNORE INTO entities (name, entityType, observations) 
-      VALUES (?, ?, ?)
+      INSERT OR IGNORE INTO entities (name, entityType, observations, embedding) 
+      VALUES (?, ?, ?, ?)
+    `);
+    const insertVecEntity = this.db.prepare(`
+      INSERT INTO entities_vec (entity_id, embedding) VALUES (?, ?)
     `);
 
     const newEntities: Entity[] = [];
 
     for (const entity of entities) {
+      // Generate a placeholder embedding (null or a zero vector) for now
+      // The actual embedding will be generated and stored in the background
+      const placeholderEmbeddingBuffer = new Float32Array(768).buffer; // Or null if your schema allows
+
       const result = insertEntity.run(
         entity.name,
         entity.entityType,
-        entity.observations.join("|||")
+        entity.observations.join("|||"),
+        placeholderEmbeddingBuffer // Store placeholder
       );
 
       if (result.changes > 0) {
         newEntities.push(entity);
+        const lastInsertRowid = result.lastInsertRowid;
+
+        // Run embedding generation and storage in the background
+        (async () => {
+          try {
+            const combinedText = `${entity.name} ${entity.observations.join(
+              " "
+            )}`;
+            const embedding = await this.generateEmbedding(combinedText);
+
+            // Update the entity with the actual embedding
+            this.db
+              .prepare("UPDATE entities SET embedding = ? WHERE id = ?")
+              .run(embedding.buffer, lastInsertRowid);
+            // Insert into the vector table
+            insertVecEntity.run(lastInsertRowid, embedding.buffer);
+          } catch (error) {
+            console.error(
+              `Error generating/storing embedding for entity ${entity.name}:`,
+              error
+            );
+          }
+        })();
       }
     }
 
@@ -159,46 +232,103 @@ class KnowledgeGraphManager {
     observations: { entityName: string; contents: string[] }[]
   ): Promise<{ entityName: string; addedObservations: string[] }[]> {
     const getEntity = this.db.prepare(
-      "SELECT observations FROM entities WHERE name = ?"
+      "SELECT id, observations FROM entities WHERE name = ?"
     );
-    const updateEntity = this.db.prepare(
+    const updateEntityObservations = this.db.prepare(
+      // Renamed to avoid confusion
       "UPDATE entities SET observations = ? WHERE name = ?"
     );
+    const updateEntityEmbedding = this.db.prepare(
+      // For updating embedding separately
+      "UPDATE entities SET embedding = ? WHERE id = ?"
+    );
+    const updateVecEntity = this.db.prepare(`
+      UPDATE entities_vec SET embedding = ? WHERE entity_id = ?
+    `);
 
-    const results = observations.map((o) => {
-      const entity = getEntity.get(o.entityName) as
-        | { observations: string }
-        | undefined;
+    const results = await Promise.all(
+      observations.map(async (o) => {
+        const entityRow = getEntity.get(o.entityName) as
+          | { id: number; observations: string }
+          | undefined;
 
-      if (!entity) {
-        throw new Error(`Entity with name ${o.entityName} not found`);
-      }
+        if (!entityRow) {
+          throw new Error(`Entity with name ${o.entityName} not found`);
+        }
 
-      const existingObservations = entity.observations
-        ? entity.observations.split("|||")
-        : [];
-      const newObservations = o.contents.filter(
-        (content) => !existingObservations.includes(content)
-      );
+        const existingObservations = entityRow.observations
+          ? entityRow.observations.split("|||")
+          : [];
+        const newObservations = o.contents.filter(
+          (content) => !existingObservations.includes(content)
+        );
 
-      if (newObservations.length > 0) {
-        const allObservations = [...existingObservations, ...newObservations];
-        updateEntity.run(allObservations.join("|||"), o.entityName);
-      }
+        let addedObservationsActually: string[] = [];
+        if (newObservations.length > 0) {
+          const allObservations = [...existingObservations, ...newObservations];
+          updateEntityObservations.run(
+            allObservations.join("|||"),
+            o.entityName
+          );
+          addedObservationsActually = newObservations;
 
-      return { entityName: o.entityName, addedObservations: newObservations };
-    });
+          // Run embedding update in the background
+          (async () => {
+            try {
+              // Fetch the entity name again, as o.entityName might not be in scope if entity is renamed later (though not current capability)
+              const currentEntity = this.db
+                .prepare("SELECT name FROM entities WHERE id = ?")
+                .get(entityRow.id) as { name: string };
+              if (!currentEntity) {
+                console.error(
+                  `Entity with id ${entityRow.id} not found for background embedding update.`
+                );
+                return;
+              }
+              const combinedText = `${
+                currentEntity.name
+              } ${allObservations.join(" ")}`;
+              const embedding = await this.generateEmbedding(combinedText);
+              updateEntityEmbedding.run(embedding.buffer, entityRow.id);
+              updateVecEntity.run(embedding.buffer, entityRow.id);
+            } catch (error) {
+              console.error(
+                `Error updating embedding for entity ${o.entityName}:`,
+                error
+              );
+            }
+          })();
+        }
+
+        return {
+          entityName: o.entityName,
+          addedObservations: addedObservationsActually,
+        };
+      })
+    );
 
     return results;
   }
 
   async deleteEntities(entityNames: string[]): Promise<void> {
+    const getEntityId = this.db.prepare(
+      "SELECT id FROM entities WHERE name = ?"
+    );
     const deleteEntity = this.db.prepare("DELETE FROM entities WHERE name = ?");
+    const deleteVecEntity = this.db.prepare(
+      "DELETE FROM entities_vec WHERE entity_id = ?"
+    );
     const deleteRelations = this.db.prepare(
       "DELETE FROM relations WHERE from_entity = ? OR to_entity = ?"
     );
 
     for (const entityName of entityNames) {
+      const entityRow = getEntityId.get(entityName) as
+        | { id: number }
+        | undefined;
+      if (entityRow) {
+        deleteVecEntity.run(entityRow.id);
+      }
       deleteEntity.run(entityName);
       deleteRelations.run(entityName, entityName);
     }
@@ -246,27 +376,46 @@ class KnowledgeGraphManager {
     return this.loadGraph();
   }
 
-  // Very basic search function
-  async searchNodes(query: string): Promise<KnowledgeGraph> {
-    const lowerQuery = query.toLowerCase();
+  async searchNodes(query: string, topK: number = 5): Promise<KnowledgeGraph> {
+    const queryEmbedding = await this.generateEmbedding(query);
+
+    const similarEntityIds = this.db
+      .prepare(
+        `
+        SELECT entity_id, distance 
+        FROM entities_vec 
+        WHERE vec_search(embedding, ?) 
+        ORDER BY distance 
+        LIMIT ?
+      `
+      )
+      .all(queryEmbedding.buffer, topK) as Array<{
+      entity_id: number;
+      distance: number;
+    }>;
+
+    if (similarEntityIds.length === 0) {
+      return { entities: [], relations: [] };
+    }
+
+    const entityIds = similarEntityIds.map((item) => item.entity_id);
+    const placeholders = entityIds.map(() => "?").join(",");
 
     const entities = this.db
       .prepare(
         `
-      SELECT * FROM entities 
-      WHERE LOWER(name) LIKE ? 
-         OR LOWER(entityType) LIKE ? 
-         OR LOWER(observations) LIKE ?
+      SELECT id, name, entityType, observations FROM entities 
+      WHERE id IN (${placeholders})
     `
       )
-      .all(`%${lowerQuery}%`, `%${lowerQuery}%`, `%${lowerQuery}%`) as Array<{
+      .all(...entityIds) as Array<{
+      id: number;
       name: string;
       entityType: string;
       observations: string;
     }>;
 
     const entityNames = entities.map((e) => e.name);
-
     let relations: Array<{
       from_entity: string;
       to_entity: string;
@@ -352,7 +501,10 @@ class KnowledgeGraphManager {
   }
 }
 
-const knowledgeGraphManager = new KnowledgeGraphManager();
+let knowledgeGraphManager: KnowledgeGraphManager;
+async function initializeManager() {
+  knowledgeGraphManager = await KnowledgeGraphManager.create();
+}
 
 // The server instance and tools exposed to Claude
 const server = new Server(
@@ -713,7 +865,15 @@ async function main() {
   console.error("Knowledge Graph MCP Server running on stdio");
 }
 
-main().catch((error) => {
-  console.error("Fatal error in main():", error);
-  process.exit(1);
-});
+// Initialize the manager before starting the main application logic
+initializeManager()
+  .then(() => {
+    main().catch((error) => {
+      console.error("Fatal error in main():", error);
+      process.exit(1);
+    });
+  })
+  .catch((error) => {
+    console.error("Fatal error initializing KnowledgeGraphManager:", error);
+    process.exit(1);
+  });

@@ -163,15 +163,14 @@ class KnowledgeGraphManager {
     const newEntities: Entity[] = [];
 
     for (const entity of entities) {
-      // Generate a placeholder embedding (null or a zero vector) for now
-      // The actual embedding will be generated and stored in the background
-      const placeholderEmbeddingBuffer = new Float32Array(768).buffer; // Or null if your schema allows
+      // Generate a placeholder Node.js Buffer for the BLOB column
+      const placeholderNodeBuffer = Buffer.from(new Float32Array(768).buffer);
 
       const result = insertEntity.run(
         entity.name,
         entity.entityType,
         entity.observations.join("|||"),
-        placeholderEmbeddingBuffer // Store placeholder
+        placeholderNodeBuffer // Store placeholder Node.js Buffer
       );
 
       if (result.changes > 0) {
@@ -184,13 +183,15 @@ class KnowledgeGraphManager {
             const combinedText = `${entity.name} ${entity.observations.join(
               " "
             )}`;
-            const embedding = await this.generateEmbedding(combinedText);
+            const embedding = await this.generateEmbedding(combinedText); // This is a Float32Array
 
-            // Update the entity with the actual embedding
+            // Update the entity with the actual embedding (as Node.js Buffer for BLOB)
+            const embeddingNodeBuffer = Buffer.from(embedding.buffer);
             this.db
               .prepare("UPDATE entities SET embedding = ? WHERE id = ?")
-              .run(embedding.buffer, lastInsertRowid);
-            // Insert into the vector table
+              .run(embeddingNodeBuffer, lastInsertRowid);
+
+            // Insert into the vector table (sqlite-vec expects ArrayBuffer)
             insertVecEntity.run(lastInsertRowid, embedding.buffer);
           } catch (error) {
             console.error(
@@ -288,8 +289,13 @@ class KnowledgeGraphManager {
               const combinedText = `${
                 currentEntity.name
               } ${allObservations.join(" ")}`;
-              const embedding = await this.generateEmbedding(combinedText);
-              updateEntityEmbedding.run(embedding.buffer, entityRow.id);
+              const embedding = await this.generateEmbedding(combinedText); // Float32Array
+
+              // Update embedding in entities table (as Node.js Buffer for BLOB)
+              const embeddingNodeBuffer = Buffer.from(embedding.buffer);
+              updateEntityEmbedding.run(embeddingNodeBuffer, entityRow.id);
+
+              // Update embedding in vector table (sqlite-vec expects ArrayBuffer)
               updateVecEntity.run(embedding.buffer, entityRow.id);
             } catch (error) {
               console.error(

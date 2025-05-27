@@ -5,12 +5,15 @@ A basic implementation of persistent memory using a local knowledge graph. This 
 ## Core Concepts
 
 ### Entities
+
 Entities are the primary nodes in the knowledge graph. Each entity has:
+
 - A unique name (identifier)
 - An entity type (e.g., "person", "organization", "event")
 - A list of observations
 
 Example:
+
 ```json
 {
   "name": "John_Smith",
@@ -20,9 +23,11 @@ Example:
 ```
 
 ### Relations
+
 Relations define directed connections between entities. They are always stored in active voice and describe how entities interact or relate to each other.
 
 Example:
+
 ```json
 {
   "from": "John_Smith",
@@ -30,7 +35,9 @@ Example:
   "relationType": "works_at"
 }
 ```
+
 ### Observations
+
 Observations are discrete pieces of information about an entity. They are:
 
 - Stored as strings
@@ -39,6 +46,7 @@ Observations are discrete pieces of information about an entity. They are:
 - Should be atomic (one fact per observation)
 
 Example:
+
 ```json
 {
   "entityName": "John_Smith",
@@ -53,7 +61,9 @@ Example:
 ## API
 
 ### Tools
+
 - **create_entities**
+
   - Create multiple new entities in the knowledge graph
   - Input: `entities` (array of objects)
     - Each object contains:
@@ -63,6 +73,7 @@ Example:
   - Ignores entities with existing names
 
 - **create_relations**
+
   - Create multiple new relations between entities
   - Input: `relations` (array of objects)
     - Each object contains:
@@ -72,6 +83,7 @@ Example:
   - Skips duplicate relations
 
 - **add_observations**
+
   - Add new observations to existing entities
   - Input: `observations` (array of objects)
     - Each object contains:
@@ -81,12 +93,14 @@ Example:
   - Fails if entity doesn't exist
 
 - **delete_entities**
+
   - Remove entities and their relations
   - Input: `entityNames` (string[])
   - Cascading deletion of associated relations
   - Silent operation if entity doesn't exist
 
 - **delete_observations**
+
   - Remove specific observations from entities
   - Input: `deletions` (array of objects)
     - Each object contains:
@@ -95,6 +109,7 @@ Example:
   - Silent operation if observation doesn't exist
 
 - **delete_relations**
+
   - Remove specific relations from the graph
   - Input: `relations` (array of objects)
     - Each object contains:
@@ -104,11 +119,13 @@ Example:
   - Silent operation if relation doesn't exist
 
 - **read_graph**
+
   - Read the entire knowledge graph
   - No input required
   - Returns complete graph structure with all entities and relations
 
 - **search_nodes**
+
   - Search for nodes based on query
   - Input: `query` (string)
   - Searches across:
@@ -131,29 +148,14 @@ Example:
 
 Add this to your claude_desktop_config.json:
 
-#### Docker
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "docker",
-      "args": ["run", "-i", "-v", "claude-memory:/app/dist", "--rm", "mcp/memory"]
-    }
-  }
-}
-```
-
 #### NPX
+
 ```json
 {
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-memory"
-      ]
+      "args": ["-y", "@qforge/qmemory"]
     }
   }
 }
@@ -168,31 +170,26 @@ The server can be configured using the following environment variables:
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-memory"
-      ],
+      "args": ["-y", "@qforge/qmemory"],
       "env": {
-        "MEMORY_FILE_PATH": "/path/to/custom/memory.json"
+        "DB_FILE_PATH": "/path/to/custom/memory.db"
       }
     }
   }
 }
 ```
 
-- `MEMORY_FILE_PATH`: Path to the memory storage JSON file (default: `memory.json` in the server directory)
+- `DB_FILE_PATH`: Path to the memory storage SQLite database file. This can be an absolute path or a filename (which will be relative to the server script's directory). Defaults to `memory.db` in the server directory.
 
 # VS Code Installation Instructions
 
 For quick installation, use one of the one-click installation buttons below:
 
-[![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-NPM-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=memory&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40modelcontextprotocol%2Fserver-memory%22%5D%7D) [![Install with NPX in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-NPM-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=memory&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40modelcontextprotocol%2Fserver-memory%22%5D%7D&quality=insiders)
-
-[![Install with Docker in VS Code](https://img.shields.io/badge/VS_Code-Docker-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=memory&config=%7B%22command%22%3A%22docker%22%2C%22args%22%3A%5B%22run%22%2C%22-i%22%2C%22-v%22%2C%22claude-memory%3A%2Fapp%2Fdist%22%2C%22--rm%22%2C%22mcp%2Fmemory%22%5D%7D) [![Install with Docker in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Docker-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=memory&config=%7B%22command%22%3A%22docker%22%2C%22args%22%3A%5B%22run%22%2C%22-i%22%2C%22-v%22%2C%22claude-memory%3A%2Fapp%2Fdist%22%2C%22--rm%22%2C%22mcp%2Fmemory%22%5D%7D&quality=insiders)
+[![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-NPM-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=memory&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40qforge%2Fqmemory%22%5D%7D) [![Install with NPX in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-NPM-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=memory&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40qforge%2Fqmemory%22%5D%7D&quality=insiders)
 
 For manual installation, add the following JSON block to your User Settings (JSON) file in VS Code. You can do this by pressing `Ctrl + Shift + P` and typing `Preferences: Open Settings (JSON)`.
 
-Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace. This will allow you to share the configuration with others. 
+Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace. This will allow you to share the configuration with others.
 
 > Note that the `mcp` key is not needed in the `.vscode/mcp.json` file.
 
@@ -204,32 +201,7 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
     "servers": {
       "memory": {
         "command": "npx",
-        "args": [
-          "-y",
-          "@modelcontextprotocol/server-memory"
-        ]
-      }
-    }
-  }
-}
-```
-
-#### Docker
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "memory": {
-        "command": "docker",
-        "args": [
-          "run",
-          "-i",
-          "-v",
-          "claude-memory:/app/dist",
-          "--rm",
-          "mcp/memory"
-        ]
+        "args": ["-y", "@qforge/qmemory"]
       }
     }
   }
@@ -240,7 +212,7 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
 
 The prompt for utilizing memory depends on the use case. Changing the prompt will help the model determine the frequency and types of memories created.
 
-Here is an example prompt for chat personalization. You could use this prompt in the "Custom Instructions" field of a [Claude.ai Project](https://www.anthropic.com/news/projects). 
+Here is an example prompt for chat personalization. You could use this prompt in the "Custom Instructions" field of a [Claude.ai Project](https://www.anthropic.com/news/projects).
 
 ```
 Follow these steps for each interaction:
@@ -270,12 +242,14 @@ Follow these steps for each interaction:
 
 ## Building
 
-Docker:
-
 ```sh
-docker build -t mcp/memory -f src/memory/Dockerfile . 
+docker build -t mcp/memory -f src/memory/Dockerfile .
 ```
+
+## Repository
+
+This project is hosted on GitHub. You can find the repository at [https://github.com/qforge/qmemory](https://github.com/qforge/qmemory).
 
 ## License
 
-This MCP server is licensed under the MIT License. This means you are free to use, modify, and distribute the software, subject to the terms and conditions of the MIT License. For more details, please see the LICENSE file in the project repository.
+This MCP server is licensed under the MIT License. This means you are free to use, modify, and distribute the software, subject to the terms and conditions of the MIT License. For more details, please see the [LICENSE](https://github.com/qforge/qmemory/blob/main/LICENSE) file in the project repository.

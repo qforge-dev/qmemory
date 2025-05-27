@@ -9,7 +9,7 @@
   "bugs": "https://github.com/qforge/qmemory/issues",
   "type": "module",
   "bin": {
-    "mcp-server-memory": "dist/index.js"
+    "qmemory": "dist/index.js"
   },
   "files": [
     "dist"

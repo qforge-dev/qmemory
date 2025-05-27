@@ -1,11 +1,11 @@
 {
-  "name": "@modelcontextprotocol/server-memory",
-  "version": "0.6.3",
-  "description": "MCP server for enabling memory for Claude through a knowledge graph",
+  "name": "@qforge/qmemory",
+  "version": "0.0.1",
+  "description": "MCP server for enabling memory through a knowledge graph",
   "license": "MIT",
-  "author": "Anthropic, PBC (https://anthropic.com)",
-  "homepage": "https://modelcontextprotocol.io",
-  "bugs": "https://github.com/modelcontextprotocol/servers/issues",
+  "author": "QForge (https://qforge.dev)",
+  "homepage": "https://qforge.dev",
+  "bugs": "https://github.com/qforge/qmemory/issues",
   "type": "module",
   "bin": {
     "mcp-server-memory": "dist/index.js"

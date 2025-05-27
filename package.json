@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "build": "tsc && shx chmod +x dist/*.js",
+    "prepublishOnly": "npm run build && npm version patch -m \"Upgrade to %s for release\"",
     "prepare": "npm run build",
     "watch": "tsc --watch"
   },

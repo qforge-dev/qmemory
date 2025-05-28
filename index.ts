@@ -73,7 +73,6 @@ class KnowledgeGraphManager {
         name TEXT UNIQUE NOT NULL,
         entityType TEXT NOT NULL,
         observations TEXT DEFAULT '',
-        embedding BLOB 
       );
 
       CREATE TABLE IF NOT EXISTS relations (
@@ -153,8 +152,8 @@ class KnowledgeGraphManager {
 
   async createEntities(entities: Entity[]): Promise<Entity[]> {
     const insertEntity = this.db.prepare(`
-      INSERT OR IGNORE INTO entities (name, entityType, observations, embedding) 
-      VALUES (?, ?, ?, ?)
+      INSERT OR IGNORE INTO entities (name, entityType, observations) 
+      VALUES (?, ?, ?)
     `);
     const insertVecEntity = this.db.prepare(`
       INSERT INTO entities_vec (entity_id, embedding) VALUES (?, ?)
@@ -163,14 +162,10 @@ class KnowledgeGraphManager {
     const newEntities: Entity[] = [];
 
     for (const entity of entities) {
-      // Generate a placeholder Node.js Buffer for the BLOB column
-      const placeholderNodeBuffer = Buffer.from(new Float32Array(768).buffer);
-
       const result = insertEntity.run(
         entity.name,
         entity.entityType,
-        entity.observations.join("|||"),
-        placeholderNodeBuffer // Store placeholder Node.js Buffer
+        entity.observations.join("|||")
       );
 
       if (result.changes > 0) {
@@ -184,12 +179,6 @@ class KnowledgeGraphManager {
               " "
             )}`;
             const embedding = await this.generateEmbedding(combinedText); // This is a Float32Array
-
-            // Update the entity with the actual embedding (as Node.js Buffer for BLOB)
-            const embeddingNodeBuffer = Buffer.from(embedding.buffer);
-            this.db
-              .prepare("UPDATE entities SET embedding = ? WHERE id = ?")
-              .run(embeddingNodeBuffer, lastInsertRowid);
 
             // Insert into the vector table (sqlite-vec expects Float32Array and BigInt for ID)
             insertVecEntity.run(BigInt(lastInsertRowid as number), embedding);
@@ -239,10 +228,6 @@ class KnowledgeGraphManager {
       // Renamed to avoid confusion
       "UPDATE entities SET observations = ? WHERE name = ?"
     );
-    const updateEntityEmbedding = this.db.prepare(
-      // For updating embedding separately
-      "UPDATE entities SET embedding = ? WHERE id = ?"
-    );
     const updateVecEntity = this.db.prepare(`
       UPDATE entities_vec SET embedding = ? WHERE entity_id = ?
     `);
@@ -290,10 +275,6 @@ class KnowledgeGraphManager {
                 currentEntity.name
               } ${allObservations.join(" ")}`;
               const embedding = await this.generateEmbedding(combinedText); // Float32Array
-
-              // Update embedding in entities table (as Node.js Buffer for BLOB)
-              const embeddingNodeBuffer = Buffer.from(embedding.buffer);
-              updateEntityEmbedding.run(embeddingNodeBuffer, entityRow.id);
 
               // Update embedding in vector table (sqlite-vec expects Float32Array and BigInt for ID)
               updateVecEntity.run(embedding, BigInt(entityRow.id));

@@ -45,12 +45,8 @@ const CACHE_DIR = process.env.CACHE_DIR
 
 mkdirSync(CACHE_DIR, { recursive: true });
 
-console.log("Using cache directory:", CACHE_DIR);
-
 const DEFAULT_EMBEDDING_MODEL: EmbeddingModel =
   (process.env.EMBEDDING_MODEL as EmbeddingModel) || EmbeddingModel.BGEBaseEN;
-
-console.log("Using embedding model:", DEFAULT_EMBEDDING_MODEL);
 
 // We are storing our memory using entities, relations, and observations in a graph structure
 interface Entity {

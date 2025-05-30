@@ -11,6 +11,7 @@ import * as sqliteVec from "sqlite-vec";
 import { FlagEmbedding, EmbeddingModel } from "fastembed";
 import path from "path";
 import { fileURLToPath } from "url";
+import { mkdirSync } from "fs";
 
 // Define database file path using environment variable with fallback
 const defaultDbPath = path.join(
@@ -42,8 +43,14 @@ const CACHE_DIR = process.env.CACHE_DIR
       )
   : defaultCacheDir;
 
+mkdirSync(CACHE_DIR, { recursive: true });
+
+console.log("Using cache directory:", CACHE_DIR);
+
 const DEFAULT_EMBEDDING_MODEL: EmbeddingModel =
   (process.env.EMBEDDING_MODEL as EmbeddingModel) || EmbeddingModel.BGEBaseEN;
+
+console.log("Using embedding model:", DEFAULT_EMBEDDING_MODEL);
 
 // We are storing our memory using entities, relations, and observations in a graph structure
 interface Entity {

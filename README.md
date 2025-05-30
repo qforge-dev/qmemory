@@ -172,14 +172,76 @@ The server can be configured using the following environment variables:
       "command": "npx",
       "args": ["-y", "@qforge/qmemory"],
       "env": {
-        "DB_FILE_PATH": "/path/to/custom/memory.db"
+        "DB_FILE_PATH": "/path/to/custom/memory.db",
+        "CACHE_DIR": "/path/to/custom/cache",
+        "EMBEDDING_MODEL": "BAAI/bge-base-en-v1.5"
       }
     }
   }
 }
 ```
 
-- `DB_FILE_PATH`: Path to the memory storage SQLite database file. This can be an absolute path or a filename (which will be relative to the server script's directory). Defaults to `memory.db` in the server directory.
+## Environment Variables
+
+The server supports the following environment variables for configuration:
+
+### `DB_FILE_PATH`
+
+- **Description**: Path to the SQLite database file where the knowledge graph data is stored
+- **Type**: String (file path)
+- **Default**: `memory.db` (in the server script's directory)
+- **Behavior**:
+  - If an absolute path is provided, it will be used as-is
+  - If a relative path or filename is provided, it will be relative to the server script's directory
+- **Example**:
+  - Absolute: `/home/user/data/my_memory.db`
+  - Relative: `custom_memory.db`
+
+### `CACHE_DIR`
+
+- **Description**: Directory path where the embedding model cache files are stored
+- **Type**: String (directory path)
+- **Default**: `cache` (in the server script's directory)
+- **Behavior**:
+  - If an absolute path is provided, it will be used as-is
+  - If a relative path is provided, it will be relative to the server script's directory
+  - The directory will be created automatically if it doesn't exist
+- **Example**:
+  - Absolute: `/home/user/.cache/qmemory`
+  - Relative: `model_cache`
+
+### `EMBEDDING_MODEL`
+
+- **Description**: Specifies which embedding model to use for semantic search functionality
+- **Type**: String (model identifier)
+- **Default**: `BAAI/bge-base-en-v1.5` (BGEBaseEN)
+- **Available Models**: Any model supported by the FastEmbed library, including:
+  - `BAAI/bge-base-en-v1.5` (default)
+  - `BAAI/bge-small-en-v1.5`
+  - `sentence-transformers/all-MiniLM-L6-v2`
+  - `sentence-transformers/all-mpnet-base-v2`
+  - And others supported by FastEmbed
+- **Note**: Different models have different embedding dimensions and performance characteristics. The vector database is configured for 768-dimensional embeddings (BGE models).
+
+### Example Configuration
+
+Here's a complete example with all environment variables configured:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@qforge/qmemory"],
+      "env": {
+        "DB_FILE_PATH": "/home/user/documents/ai_memory.db",
+        "CACHE_DIR": "/home/user/.cache/qmemory_models",
+        "EMBEDDING_MODEL": "BAAI/bge-small-en-v1.5"
+      }
+    }
+  }
+}
+```
 
 # VS Code Installation Instructions
 

@@ -97,7 +97,7 @@ class KnowledgeGraphManager {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
         entityType TEXT NOT NULL,
-        observations TEXT DEFAULT '',
+        observations TEXT DEFAULT ''
       );
 
       CREATE TABLE IF NOT EXISTS relations (

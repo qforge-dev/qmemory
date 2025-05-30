@@ -82,6 +82,7 @@ class KnowledgeGraphManager {
     manager.embeddingModel = await FlagEmbedding.init({
       model: DEFAULT_EMBEDDING_MODEL,
       cacheDir: CACHE_DIR,
+      showDownloadProgress: false,
     });
     return manager;
   }

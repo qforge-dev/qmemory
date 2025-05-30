@@ -28,6 +28,23 @@ const DB_FILE_PATH = process.env.DB_FILE_PATH
       )
   : defaultDbPath;
 
+const defaultCacheDir = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "cache"
+);
+
+const CACHE_DIR = process.env.CACHE_DIR
+  ? path.isAbsolute(process.env.CACHE_DIR)
+    ? process.env.CACHE_DIR
+    : path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        process.env.CACHE_DIR
+      )
+  : defaultCacheDir;
+
+const DEFAULT_EMBEDDING_MODEL: EmbeddingModel =
+  (process.env.EMBEDDING_MODEL as EmbeddingModel) || EmbeddingModel.BGEBaseEN;
+
 // We are storing our memory using entities, relations, and observations in a graph structure
 interface Entity {
   name: string;
@@ -60,7 +77,8 @@ class KnowledgeGraphManager {
   public static async create(): Promise<KnowledgeGraphManager> {
     const manager = new KnowledgeGraphManager();
     manager.embeddingModel = await FlagEmbedding.init({
-      model: EmbeddingModel.BGEBaseEN,
+      model: DEFAULT_EMBEDDING_MODEL,
+      cacheDir: CACHE_DIR,
     });
     return manager;
   }
